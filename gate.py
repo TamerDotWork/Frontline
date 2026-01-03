@@ -110,21 +110,6 @@ async def call_llm_and_broadcast(body: dict):
     # Broadcast to all dashboard clients
     await manager.broadcast(log_entry)
 
-
-@app.post("/chat")
-async def gateway_chat(request: Request, background_tasks: BackgroundTasks):
-    """
-    Receives Gemini Flash JSON { "contents": [{"parts": [{"text": "..."}]}] } from external app
-    and processes LLM asynchronously.
-    """
-    if not GATEWAY_CONFIG["llm_url"]:
-        return JSONResponse({"error": "Gateway not configured"}, status_code=400)
-
-    body = await request.json()
-    background_tasks.add_task(call_llm_and_broadcast, body)
-    return {"status": "processing", "prompt": body.get("contents", [{}])[0].get("parts", [{}])[0].get("text")}
-
-
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """
@@ -136,3 +121,17 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.receive_text()  # keep connection alive
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+
+
+@app.post("/chat")
+async def gateway_chat(request: Request, background_tasks: BackgroundTasks):
+ 
+    if not GATEWAY_CONFIG["llm_url"]:
+        return JSONResponse({"error": "Gateway not configured"}, status_code=400)
+
+    body = await request.json()
+    background_tasks.add_task(call_llm_and_broadcast, body)
+    return {"status": "processing", "prompt": body.get("contents", [{}])[0].get("parts", [{}])[0].get("text")}
+
+
