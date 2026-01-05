@@ -53,7 +53,7 @@
       console.log("WebSocket disconnected");
  
  
-      sc.textContent = "WebSocket disconnected!";
+     sc.textContent = "WebSocket disconnected!";
      statusContainer.classList.remove("success");
      statusContainer.classList.remove("failure");
     };
