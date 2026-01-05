@@ -6,7 +6,6 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 import os
-
 load_dotenv()
 
 
@@ -24,7 +23,6 @@ app.state.config = {
 
 MESSAGE_LOGS = []
 
-
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
@@ -41,10 +39,7 @@ class ConnectionManager:
         for connection in self.active_connections:
             await connection.send_json(message)
 
-
 manager = ConnectionManager()
-
-
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -53,7 +48,6 @@ async def index(request: Request):
         {"request": request, "config": app.state.config}
     )
 
-
 @app.post("/save-config")
 async def save_config(
     api_key: str = Form(...),
@@ -61,15 +55,15 @@ async def save_config(
     provider: str = Form(...),
     model: str = Form(...)
 ):
-    # Update global config
-    app.state.config["base_url"] = gateway_url
-    app.state.config["provider"] = provider
-    app.state.config["api_key"] = api_key
-    app.state.config["model"] = model
 
-    print("Updated Config:", app.state.config)
+app.state.config["base_url"] = gateway_url
+app.state.config["provider"] = provider
+app.state.config["api_key"] = api_key
+app.state.config["model"] = model
 
-    return RedirectResponse(url="/dashboard", status_code=303)
+print("Updated Config:", app.state.config)
+
+return RedirectResponse(url="/dashboard", status_code=303)
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -79,15 +73,12 @@ async def dashboard(request: Request):
         {"request": request, "config": app.state.config}
     )
 
-
 @app.get("/projects", response_class=HTMLResponse)
 async def projects(request: Request):
     return templates.TemplateResponse(
         "projects.html",
         {"request": request, "config": app.state.config}
     )
-
- 
 
 @app.post("/chat")
 async def gateway_chat(request: Request, background_tasks: BackgroundTasks):
@@ -98,7 +89,6 @@ async def gateway_chat(request: Request, background_tasks: BackgroundTasks):
     background_tasks.add_task(call_llm_and_broadcast, body)
     prompt = normalize_prompt(body)
     return {"status": "processing", "prompt": prompt}
-
 
 def normalize_prompt(body: dict) -> str:
     # Gemini / Gemma
@@ -118,8 +108,6 @@ def normalize_prompt(body: dict) -> str:
         return body["prompt"]
 
     return str(body)
-
-
 
 def resolve_provider_url():
     provider = app.state.config.get("provider")
@@ -147,9 +135,6 @@ def resolve_provider_url():
     # fallback
     return base_url
 
-
-
-
 def build_request_payload(prompt: str):
     provider = app.state.config["provider"]
 
@@ -171,8 +156,6 @@ def build_request_payload(prompt: str):
 
     return {"prompt": prompt}
 
-
-
 def parse_response_output(provider: str, data: dict):
     if provider in ["gemini", "gemma3","google"]:
         try:
@@ -193,8 +176,6 @@ def parse_response_output(provider: str, data: dict):
             return str(data)
 
     return str(data)
-
-
 
 async def call_llm_and_broadcast(body: dict):
     provider = app.state.config["provider"]
@@ -243,8 +224,6 @@ async def call_llm_and_broadcast(body: dict):
     log_entry = {"prompt": prompt, "response": model_output, "meta": meta,"data": data}
     MESSAGE_LOGS.append(log_entry)
     await manager.broadcast(log_entry)
-
-
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
