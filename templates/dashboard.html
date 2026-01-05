@@ -8,6 +8,49 @@
         <link rel="icon" type="image/png" sizes="32x32" href="static/favicon-32x32.png">
         <link rel="icon" type="image/png" sizes="16x16" href="static/favicon-16x16.png">
         <link rel="manifest" href="static/site.webmanifest">
+        <style>
+               /* 1. Layout Styles (Just to align them like your screenshot likely is) */
+    .cards-wrapper {
+        display: flex;
+        gap: 10px;
+        background: #333; /* Dark bg to see the white SVGs */
+        padding: 20px;
+        align-items: center;
+    }
+
+    /* 2. Initial State of the SVG */
+    .cards-wrapper svg {
+        opacity: 0; /* Hidden initially */
+        transform: translateY(20px); /* Push down slightly */
+        /* Apply the animation: name, duration, easing, fill-mode */
+        animation: fadeUpColor 0.6s ease-out forwards;
+    }
+
+    /* 3. The Animation Keyframes */
+    @keyframes fadeUpColor {
+        to {
+            opacity: 1; /* Become visible */
+            transform: translateY(0); /* Move to original position */
+        }
+    }
+
+    /* 4. Sequential Delays (The "Steps" effect) */
+    /* We target every SVG inside the wrapper and add delay */
+    .cards-wrapper svg:nth-of-type(1) { animation-delay: 0.1s; }
+    .cards-wrapper svg:nth-of-type(2) { animation-delay: 0.2s; }
+    .cards-wrapper svg:nth-of-type(3) { animation-delay: 0.3s; }
+    .cards-wrapper svg:nth-of-type(4) { animation-delay: 0.4s; }
+    .cards-wrapper svg:nth-of-type(5) { animation-delay: 0.5s; }
+    .cards-wrapper svg:nth-of-type(6) { animation-delay: 0.6s; }
+
+    /* Optional: Style the text middle section */
+    .stats-block {
+        color: white;
+        text-align: center;
+        font-family: sans-serif;
+        margin: 0 15px;
+    }
+        </style>
     </head>
     <body>
 <header>

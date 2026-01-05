@@ -64,3 +64,26 @@
     statusContainer.classList.add("failure");
     };
  
+ 
+    document.addEventListener("DOMContentLoaded", () => {
+        // 1. Select all SVGs inside your container
+        // Note: We use .querySelectorAll to get a list
+        const svgs = document.querySelectorAll('.core div svg');
+
+        // 2. Loop through them
+        svgs.forEach((svg, index) => {
+            
+            // Set initial style via JS to ensure they are hidden
+            svg.style.opacity = '0';
+            svg.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
+            svg.style.transform = 'translateY(20px)';
+            
+            // 3. Create a Timeout for the delay
+            // index * 150 means: 0ms, 150ms, 300ms, 450ms...
+            setTimeout(() => {
+                svg.style.opacity = '1';
+                svg.style.transform = 'translateY(0)';
+            }, index * 150); 
+        });
+    });
+ 
