@@ -8,7 +8,6 @@
         <link rel="icon" type="image/png" sizes="32x32" href="static/favicon-32x32.png">
         <link rel="icon" type="image/png" sizes="16x16" href="static/favicon-16x16.png">
         <link rel="manifest" href="static/site.webmanifest">
-
     </head>
     <body>
 <header>
@@ -52,13 +51,40 @@
 </header>
 <main>
     <div class="container">
-        <div class="hero">
-            <h2>AI Gateway</h2>
-            <h1>AI Gateway </h1>
-            <p>AI Gateway AI Gateway AI Gateway AI Gateway AI Gateway AI Gateway </p>
-            <a href="/dashboard" class="btn btn-primary">Create new project</a>
-            <a href="/dashboard" class="btn btn-secondary">Create new project</a>
-            <a href="#" class="btn btn-secondary">Get started</a>
+        <div class=" ">
+            <h3>Config</h3>
+            <p>Monitor, evaluate, and control your generative AI models with a single, enterprise-grade dashboard, designed for banking, finance, and regulated environments.</p>
+<form method="post" action="/save-config">
+
+<div class="input-wrap">
+<label for="">Base URL</label>
+<input type="text"  name="gateway_url" id="gateway_url">
+</div>
+
+<div class="input-wrap">
+<label for="">Provider</label>
+<select name="provider" id="provider">
+<option value="ollama">Ollama</option>
+<option value="google">Google</option>
+</select>
+</div>
+
+<div class="input-wrap">
+<label for="">Model</label>
+<select name="model" id="model">
+<option value="Gemma3">Gemma3</option>
+<option value="gemma2:9b-instruct-q5_0">Gemma2:9b-instruct-q5_0</option>
+<option value="gemini-flash-latest">Gemini Flash Latest</option>
+</select>
+</div>
+
+<div class="input-wrap">
+<label for="">API / Secret Key</label>
+<input type="text"  name="api_key" id="api_key">
+</div>
+              
+                    <button type="submit" class="btn btn-primary">Save Configuration</button>
+                </form>
         </div>
     </div>
 </main>

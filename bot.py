@@ -1,16 +1,18 @@
-
 import requests
- 
-URL = ("http://localhost:8000/chat")
 
-question = "What is Sex?"
+URL = "http://127.0.0.1:8000/chat"
+
+question = "What is AI???"
 
 payload = {
-    "contents": [
-        {"parts": [{"text": question}]}
+    "model": "gemma2:9b-instruct-q5_0",
+    "stream": False,
+    "messages": [
+        {"role": "user", "content": question}
     ]
 }
 
 response = requests.post(URL, json=payload)
 data = response.json()
 
+print("Response:", data)

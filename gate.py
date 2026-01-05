@@ -1,7 +1,7 @@
 import time
 import httpx
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, BackgroundTasks
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, BackgroundTasks, Form
+from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
@@ -9,23 +9,22 @@ import os
 
 load_dotenv()
 
-API_KEY = os.getenv("GOOGLE_API_KEY")
-if not API_KEY:
-    raise ValueError("API Key not found! Add GOOGLE_API_KEY to .env")
-
-GATEWAY_CONFIG = {
-    "llm_url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent",
-    "api_key": API_KEY
-}
-
-MESSAGE_LOGS = []
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
+app.state.config = {
+    "api_key": "",
+    "provider": "",
+    "base_url": "",
+    "model": ""
+}
 
-# Store active WebSocket connections
+
+MESSAGE_LOGS = []
+
+
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
@@ -35,7 +34,8 @@ class ConnectionManager:
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
         for connection in self.active_connections:
@@ -45,37 +45,177 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+
 @app.get("/", response_class=HTMLResponse)
+async def index(request: Request):
+    return templates.TemplateResponse(
+        "config.html",
+        {"request": request, "config": app.state.config}
+    )
+
+
+@app.post("/save-config")
+async def save_config(
+    api_key: str = Form(...),
+    gateway_url: str = Form(...),
+    provider: str = Form(...),
+    model: str = Form(...)
+):
+    # Update global config
+    app.state.config["base_url"] = gateway_url
+    app.state.config["provider"] = provider
+    app.state.config["api_key"] = api_key
+    app.state.config["model"] = model
+
+    print("Updated Config:", app.state.config)
+
+    return RedirectResponse(url="/dashboard", status_code=303)
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+    return templates.TemplateResponse(
+        "dashboard.html",
+        {"request": request, "config": app.state.config}
+    )
 
 
-@app.post("/configure")
-async def configure_gateway(config: dict):
-    GATEWAY_CONFIG["llm_url"] = config.get("llm_url")
-    GATEWAY_CONFIG["api_key"] = config.get("api_key")
-    return {"status": "configured", "config": GATEWAY_CONFIG}
+@app.get("/projects", response_class=HTMLResponse)
+async def projects(request: Request):
+    return templates.TemplateResponse(
+        "projects.html",
+        {"request": request, "config": app.state.config}
+    )
+
+ 
+
+@app.post("/chat")
+async def gateway_chat(request: Request, background_tasks: BackgroundTasks):
+    if not resolve_provider_url():
+        return JSONResponse({"error": "Provider not supported"}, status_code=400)
+
+    body = await request.json()
+    background_tasks.add_task(call_llm_and_broadcast, body)
+    prompt = normalize_prompt(body)
+    return {"status": "processing", "prompt": prompt}
+
+
+def normalize_prompt(body: dict) -> str:
+    # Gemini / Gemma
+    try:
+        return body["contents"][0]["parts"][0]["text"]
+    except Exception:
+        pass
+
+    # OpenAI format
+    try:
+        return body["messages"][-1]["content"]
+    except Exception:
+        pass
+
+    # Ollama fallback
+    if "prompt" in body:
+        return body["prompt"]
+
+    return str(body)
+
+
+
+def resolve_provider_url():
+    provider = app.state.config.get("provider")
+    base_url = app.state.config.get("base_url")
+    model = app.state.config.get("model")
+
+    if provider == "ollama":
+        if base_url:
+            # ensure the URL ends with /api/chat
+            if not base_url.endswith("/api/chat"):
+                base_url = base_url.rstrip("/") + "/api/chat"
+            return base_url
+        else:
+            return None
+
+    if provider in ["gemini", "gemma3","google"]:
+        return (
+            "https://generativelanguage.googleapis.com/v1beta/"
+            f"models/{model}:generateContent"
+        )
+
+    if provider == "openai":
+        return "https://api.openai.com/v1/chat/completions"
+
+    # fallback
+    return base_url
+
+
+
+
+def build_request_payload(prompt: str):
+    provider = app.state.config["provider"]
+
+    if provider in ["gemini", "gemma3","google"]:
+        return {"contents": [{"parts": [{"text": prompt}]}]}
+
+    if provider == "openai":
+        return {
+            "model": app.state.config["model"],
+            "messages": [{"role": "user", "content": prompt}]
+        }
+
+    if provider == "ollama":
+        return {
+            "model": app.state.config["model"],
+            "stream": False,
+            "messages": [{"role": "user", "content": prompt}]
+        }
+
+    return {"prompt": prompt}
+
+
+
+def parse_response_output(provider: str, data: dict):
+    if provider in ["gemini", "gemma3","google"]:
+        try:
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception:
+            return str(data)
+
+    if provider == "openai":
+        try:
+            return data["choices"][0]["message"]["content"]
+        except Exception:
+            return str(data)
+
+    if provider == "ollama":
+        try:
+            return data["message"]["content"]
+        except Exception:
+            return str(data)
+
+    return str(data)
+
 
 
 async def call_llm_and_broadcast(body: dict):
-    """
-    Call LLM async and broadcast result to all dashboard clients.
-    """
+    provider = app.state.config["provider"]
     start = time.time()
-    url = GATEWAY_CONFIG["llm_url"]
-    if GATEWAY_CONFIG["api_key"]:
+
+    prompt = normalize_prompt(body)
+    payload = build_request_payload(prompt)
+    url = resolve_provider_url()
+    headers = {}
+
+    # Provider-specific auth
+    if provider == "openai":
+        headers["Authorization"] = f"Bearer {app.state.config['api_key']}"
+
+    if provider in ["gemini", "gemma2", "google"]:
         sep = "&" if "?" in url else "?"
-        url = f"{url}{sep}key={GATEWAY_CONFIG['api_key']}"
+        url = f"{url}{sep}key={app.state.config['api_key']}"
 
-    # Extract prompt from Gemini Flash payload
-    try:
-        prompt = body["contents"][0]["parts"][0]["text"]
-    except (KeyError, IndexError):
-        prompt = str(body)  # fallback
-
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=40) as client:
         try:
-            resp = await client.post(url, json=body)
+            resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
@@ -89,49 +229,34 @@ async def call_llm_and_broadcast(body: dict):
             return
 
     latency = round((time.time() - start) * 1000, 2)
-
-    try:
-        model_output = data["content"][0]["text"]
-    except (KeyError, IndexError):
-        model_output = str(data)
+    model_output = parse_response_output(provider, data)
 
     meta = {
         "status_code": resp.status_code,
         "latency_ms": latency,
-        "request_bytes": len(str(body)),
+        "provider": provider,
+        "request_bytes": len(str(payload)),
         "response_bytes": len(str(data)),
-        "token_usage": data.get("tokenUsage", {}),
-        "cost_usd": None
+        "token_usage": data.get("usage", data.get("tokenUsage", {}))
     }
 
-    log_entry = {"prompt": prompt, "response": model_output, "meta": meta}
+    log_entry = {"prompt": prompt, "response": model_output, "meta": meta,"data": data}
     MESSAGE_LOGS.append(log_entry)
-
-    # Broadcast to all dashboard clients
     await manager.broadcast(log_entry)
+
+
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """
-    Dashboard WebSocket connection.
-    """
     await manager.connect(websocket)
     try:
         while True:
-            await websocket.receive_text()  # keep connection alive
+            await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
 
 
-@app.post("/chat")
-async def gateway_chat(request: Request, background_tasks: BackgroundTasks):
+
+
  
-    if not GATEWAY_CONFIG["llm_url"]:
-        return JSONResponse({"error": "Gateway not configured"}, status_code=400)
-
-    body = await request.json()
-    background_tasks.add_task(call_llm_and_broadcast, body)
-    return {"status": "processing", "prompt": body.get("contents", [{}])[0].get("parts", [{}])[0].get("text")}
-
-
