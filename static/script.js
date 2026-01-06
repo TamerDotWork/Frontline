@@ -15,16 +15,17 @@
       const data = JSON.parse(event.data);
 
       // Create a new log entry
+      const div_total = document.getElementById("total");
       const div = document.createElement("div");
       div.className = "log-entry";
 
       const prompt = document.createElement("p");
       prompt.innerHTML = `<strong>Prompt:</strong> ${data.prompt}`;
-      div.appendChild(prompt);
+      // div.appendChild(prompt);
 
       const response = document.createElement("p");
       response.innerHTML = `<strong>Response:</strong> ${data.response}`;
-      div.appendChild(response);
+      // div.appendChild(response);
 
       if (data.meta) {
         const meta = document.createElement("p");
@@ -36,14 +37,15 @@
           <strong>Request Bytes:</strong> ${data.meta.request_bytes || "-"} |
           <strong>Response Bytes:</strong> ${data.meta.response_bytes || "-"}
         `;
-        div.appendChild(meta);
-        console.log(data.meta);
-        console.log(data.data);
-        console.log(data);
+        // div.appendChild(meta);
+    
+       div_total.textContent =  data.data.usageMetadata.totalTokenCount;
+        // console.log(data.data.usageMetadata.totalTokenCount);
+      
       }
 
       // Add to logs container
-      logsDiv.appendChild(div);
+      // logsDiv.appendChild(div);
 
       // Auto-scroll
       logsDiv.scrollTop = logsDiv.scrollHeight;
@@ -65,25 +67,12 @@
     };
  
  
-    document.addEventListener("DOMContentLoaded", () => {
-        // 1. Select all SVGs inside your container
-        // Note: We use .querySelectorAll to get a list
-        const svgs = document.querySelectorAll('.core div svg');
+document.addEventListener("DOMContentLoaded", () => {
+    const svgs = document.querySelectorAll('.core div svg');
+    const delay = 0.15; // seconds
 
-        // 2. Loop through them
-        svgs.forEach((svg, index) => {
-            
-            // Set initial style via JS to ensure they are hidden
-            svg.style.opacity = '0';
-            svg.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
-            svg.style.transform = 'translateY(20px)';
-            
-            // 3. Create a Timeout for the delay
-            // index * 150 means: 0ms, 150ms, 300ms, 450ms...
-            setTimeout(() => {
-                svg.style.opacity = '1';
-                svg.style.transform = 'translateY(0)';
-            }, index * 150); 
-        });
+    svgs.forEach((svg, index) => {
+        svg.style.animationDelay = `${index * delay}s`;
+        svg.style.animationIterationCount = 'infinite'; // loop forever
     });
- 
+});

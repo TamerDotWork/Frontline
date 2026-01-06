@@ -2,7 +2,7 @@ import requests
 
 URL = "http://127.0.0.1:8000/chat"
 
-question = "What is AI???"
+question = "What is Love???"
 
 payload = {
     "model": "gemma2:9b-instruct-q5_0",

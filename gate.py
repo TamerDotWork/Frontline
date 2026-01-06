@@ -1,4 +1,8 @@
 import time
+import json
+from pathlib import Path
+from datetime import datetime
+
 import httpx
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, BackgroundTasks, Form
 from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
@@ -6,8 +10,8 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 import os
-load_dotenv()
 
+load_dotenv()
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -20,26 +24,71 @@ app.state.config = {
     "model": ""
 }
 
-
 MESSAGE_LOGS = []
 
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
+# running counters per session/project
+PROJECT_COUNTERS = {}
 
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
+# optional file storage directory (no DB)
+LOG_DIR = Path("storage/logs")
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
 
-    async def broadcast(self, message: dict):
-        for connection in self.active_connections:
-            await connection.send_json(message)
+# ----------------------------------------------------
+# Helpers
+# ----------------------------------------------------
 
-manager = ConnectionManager()
+def save_log_to_file(entry: dict):
+    """Append log to a JSONL file (no DB, append-only)."""
+    date = datetime.utcnow().strftime("%Y-%m-%d")
+    file_path = LOG_DIR / f"{date}.jsonl"
+    with file_path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def update_project_counters(project_id: str, meta: dict):
+    """Maintain running totals: messages + tokens per session."""
+
+    if project_id not in PROJECT_COUNTERS:
+            PROJECT_COUNTERS[project_id] = {
+                "total_messages": 0,
+                "total_tokens_input": 0,
+                "total_tokens_output": 0,
+                "total_tokens": 0
+            }
+
+    counters = PROJECT_COUNTERS[project_id]
+
+    usage = meta.get("token_usage", {}) or {}
+
+    # normalize token fields across providers
+    in_tokens = (
+        usage.get("promptTokens")
+        or usage.get("prompt_tokens")
+        or usage.get("input_tokens")
+        or 0
+    )
+
+    out_tokens = (
+        usage.get("candidatesTokens")
+        or usage.get("completion_tokens")
+        or usage.get("output_tokens")
+        or 0
+    )
+
+    total_tokens = in_tokens + out_tokens
+
+    counters["total_messages"] += 1
+    counters["total_tokens_input"] += in_tokens
+    counters["total_tokens_output"] += out_tokens
+    counters["total_tokens"] += total_tokens
+
+    return counters
+
+
+# ----------------------------------------------------
+# Web UI Routes
+# ----------------------------------------------------
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -48,6 +97,7 @@ async def index(request: Request):
         {"request": request, "config": app.state.config}
     )
 
+
 @app.post("/save-config")
 async def save_config(
     api_key: str = Form(...),
@@ -55,15 +105,13 @@ async def save_config(
     provider: str = Form(...),
     model: str = Form(...)
 ):
+    app.state.config["base_url"] = gateway_url
+    app.state.config["provider"] = provider
+    app.state.config["api_key"] = api_key
+    app.state.config["model"] = model
 
-app.state.config["base_url"] = gateway_url
-app.state.config["provider"] = provider
-app.state.config["api_key"] = api_key
-app.state.config["model"] = model
-
-print("Updated Config:", app.state.config)
-
-return RedirectResponse(url="/dashboard", status_code=303)
+    print("Updated Config:", app.state.config)
+    return RedirectResponse(url="/dashboard", status_code=303)
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -73,6 +121,7 @@ async def dashboard(request: Request):
         {"request": request, "config": app.state.config}
     )
 
+
 @app.get("/projects", response_class=HTMLResponse)
 async def projects(request: Request):
     return templates.TemplateResponse(
@@ -80,15 +129,10 @@ async def projects(request: Request):
         {"request": request, "config": app.state.config}
     )
 
-@app.post("/chat")
-async def gateway_chat(request: Request, background_tasks: BackgroundTasks):
-    if not resolve_provider_url():
-        return JSONResponse({"error": "Provider not supported"}, status_code=400)
 
-    body = await request.json()
-    background_tasks.add_task(call_llm_and_broadcast, body)
-    prompt = normalize_prompt(body)
-    return {"status": "processing", "prompt": prompt}
+# ----------------------------------------------------
+# Prompt Normalization
+# ----------------------------------------------------
 
 def normalize_prompt(body: dict) -> str:
     # Gemini / Gemma
@@ -97,17 +141,22 @@ def normalize_prompt(body: dict) -> str:
     except Exception:
         pass
 
-    # OpenAI format
+    # OpenAI
     try:
         return body["messages"][-1]["content"]
     except Exception:
         pass
 
-    # Ollama fallback
+    # Ollama
     if "prompt" in body:
         return body["prompt"]
 
     return str(body)
+
+
+# ----------------------------------------------------
+# Provider URL Resolver
+# ----------------------------------------------------
 
 def resolve_provider_url():
     provider = app.state.config.get("provider")
@@ -116,14 +165,12 @@ def resolve_provider_url():
 
     if provider == "ollama":
         if base_url:
-            # ensure the URL ends with /api/chat
             if not base_url.endswith("/api/chat"):
                 base_url = base_url.rstrip("/") + "/api/chat"
             return base_url
-        else:
-            return None
+        return None
 
-    if provider in ["gemini", "gemma3","google"]:
+    if provider in ["gemini", "gemma3", "google"]:
         return (
             "https://generativelanguage.googleapis.com/v1beta/"
             f"models/{model}:generateContent"
@@ -132,13 +179,17 @@ def resolve_provider_url():
     if provider == "openai":
         return "https://api.openai.com/v1/chat/completions"
 
-    # fallback
     return base_url
+
+
+# ----------------------------------------------------
+# Payload Builder
+# ----------------------------------------------------
 
 def build_request_payload(prompt: str):
     provider = app.state.config["provider"]
 
-    if provider in ["gemini", "gemma3","google"]:
+    if provider in ["gemini", "gemma3", "google"]:
         return {"contents": [{"parts": [{"text": prompt}]}]}
 
     if provider == "openai":
@@ -156,8 +207,13 @@ def build_request_payload(prompt: str):
 
     return {"prompt": prompt}
 
+
+# ----------------------------------------------------
+# Provider Output Parsing
+# ----------------------------------------------------
+
 def parse_response_output(provider: str, data: dict):
-    if provider in ["gemini", "gemma3","google"]:
+    if provider in ["gemini", "gemma3", "google"]:
         try:
             return data["candidates"][0]["content"]["parts"][0]["text"]
         except Exception:
@@ -177,8 +233,43 @@ def parse_response_output(provider: str, data: dict):
 
     return str(data)
 
+
+# ----------------------------------------------------
+# CHAT ENTRYPOINT
+# ----------------------------------------------------
+
+@app.post("/chat")
+async def gateway_chat(request: Request, background_tasks: BackgroundTasks):
+    if not resolve_provider_url():
+        return JSONResponse({"error": "Provider not supported"}, status_code=400)
+
+    body = await request.json()
+
+    # project/session id provided by client
+    project_id = body.get("project_id", "default")
+    body["_project_id"] = project_id
+
+    background_tasks.add_task(call_llm_and_broadcast, body)
+
+    prompt = normalize_prompt(body)
+
+    return {
+        "status": "processing",
+        "project_id": project_id,
+        "prompt": prompt
+    }
+
+
+# ----------------------------------------------------
+# MAIN LLM CALL + METRICS
+# ----------------------------------------------------
+
 async def call_llm_and_broadcast(body: dict):
+    from fastapi import WebSocket
+
+    project_id = body.get("_project_id", "default")
     provider = app.state.config["provider"]
+
     start = time.time()
 
     prompt = normalize_prompt(body)
@@ -186,11 +277,11 @@ async def call_llm_and_broadcast(body: dict):
     url = resolve_provider_url()
     headers = {}
 
-    # Provider-specific auth
+    # auth
     if provider == "openai":
         headers["Authorization"] = f"Bearer {app.state.config['api_key']}"
 
-    if provider in ["gemini", "gemma2", "google"]:
+    if provider in ["gemini", "gemma3", "google"]:
         sep = "&" if "?" in url else "?"
         url = f"{url}{sep}key={app.state.config['api_key']}"
 
@@ -200,12 +291,27 @@ async def call_llm_and_broadcast(body: dict):
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
+            meta = {
+                "status_code": 500,
+                "latency_ms": 0,
+                "provider": provider,
+                "token_usage": {}
+            }
+
+            totals = update_project_counters(project_id, meta)
+            meta["session_totals"] = totals
+            meta["message_index"] = totals["total_messages"]
+
             log_entry = {
+                "project_id": project_id,
                 "prompt": prompt,
                 "response": f"Error: {str(e)}",
-                "meta": {"status_code": 500, "latency_ms": 0}
+                "meta": meta
             }
+
             MESSAGE_LOGS.append(log_entry)
+            save_log_to_file(log_entry)
+
             await manager.broadcast(log_entry)
             return
 
@@ -221,9 +327,50 @@ async def call_llm_and_broadcast(body: dict):
         "token_usage": data.get("usage", data.get("tokenUsage", {}))
     }
 
-    log_entry = {"prompt": prompt, "response": model_output, "meta": meta,"data": data}
+    # 🔹 update running totals (MESSAGE + TOKENS)
+    totals = update_project_counters(project_id, meta)
+
+    # attach counters to meta
+    meta["session_totals"] = totals
+    meta["message_index"] = totals["total_messages"]
+
+    log_entry = {
+        "project_id": project_id,
+        "prompt": prompt,
+        "response": model_output,
+        "meta": meta,
+        "data": data
+    }
+
     MESSAGE_LOGS.append(log_entry)
+    save_log_to_file(log_entry)
+
     await manager.broadcast(log_entry)
+
+
+# ----------------------------------------------------
+# WebSocket
+# ----------------------------------------------------
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            await connection.send_json(message)
+
+
+manager = ConnectionManager()
+
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -233,9 +380,3 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
-
-
-
-
-
- 
