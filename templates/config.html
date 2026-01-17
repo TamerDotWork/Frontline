@@ -57,12 +57,12 @@
 <form method="post" action="/save-config">
 
 <div class="input-wrap">
-<label for="">Base URL</label>
+<label for="gateway_url">Base URL</label>
 <input type="text"  name="gateway_url" id="gateway_url">
 </div>
 
 <div class="input-wrap">
-<label for="">Provider</label>
+<label for="provider">Provider</label>
 <select name="provider" id="provider">
 <option value="ollama">Ollama</option>
 <option value="google">Google</option>
@@ -70,7 +70,7 @@
 </div>
 
 <div class="input-wrap">
-<label for="">Model</label>
+<label for="model">Model</label>
 <select name="model" id="model">
 <option value="Gemma3">Gemma3</option>
 <option value="gemma2:9b-instruct-q5_0">Gemma2:9b-instruct-q5_0</option>
@@ -79,8 +79,18 @@
 </div>
 
 <div class="input-wrap">
-<label for="">API / Secret Key</label>
+<label for="api_key">API / Secret Key</label>
 <input type="text"  name="api_key" id="api_key">
+</div>
+
+<div class="input-wrap">
+    <label for="input_rate">Input Rate ($ per 1K tokens)</label>
+    <input type="text"  name="input_rate" id="input_rate"    readonly>
+</div>
+
+<div class="input-wrap">
+    <label for="output_rate">Output Rate ($ per 1K tokens)</label>
+    <input type="text"  name="output_rate" id="output_rate"     readonly>
 </div>
               
                     <button type="submit" class="btn btn-primary">Save Configuration</button>
@@ -88,6 +98,42 @@
         </div>
     </div>
 </main>
-    <!-- <script src="static/js/script.js"></script> -->
+     <script type="text/javascript" >
+// Corrected rates data structure
+const ratesData = [
+    { provider: "ollama", model: "Gemma3", input: 0.00001, output: 0.00003, text: "ollama Gemma3 standard rate" },
+    { provider: "ollama", model: "gemma2:9b-instruct-q5_0", input: 0.000012, output: 0.000035, text: "ollama Gemma2 instruct rate" },
+    { provider: "google", model: "gemini-flash-latest", input: 0.00002, output: 0.00004, text: "google Gemini Flash latest rate" }
+];
+
+const providerSelect = document.getElementById("provider");
+const modelSelect = document.getElementById("model");
+const inputRateField = document.getElementById("input_rate");
+const outputRateField = document.getElementById("output_rate");
+
+// Function to update rates
+function updateRates() {
+    const provider = providerSelect.value;
+    const model = modelSelect.value;
+
+    // Find the matching rate object
+    const rateInfo = ratesData.find(r => r.provider === provider && r.model === model);
+
+    if (rateInfo) {
+        inputRateField.value = rateInfo.input;
+        outputRateField.value = rateInfo.output;
+    } else {
+        inputRateField.value = `N/A`;
+        outputRateField.value = `N/A`;
+    }
+}
+
+// Trigger update on provider or model change
+providerSelect.addEventListener("change", updateRates);
+modelSelect.addEventListener("change", updateRates);
+
+// Initialize on page load
+updateRates();
+     </script> 
     </body>
 </html>
